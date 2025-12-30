@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+  <title>Tetris</title>
+  <style>
+    :root{--cell:28px}
+    body{
+      display:flex;gap:20px;align-items:flex-start;justify-content:center;
+      height:100vh;margin:0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial;
+      background:#0b1020;color:#e6eef8;flex-wrap:wrap;
+    }
+    .board{background:#071028;padding:14px;border-radius:12px;
+      box-shadow:0 8px 30px rgba(2,6,23,.6)}
+    canvas{background:#071028;display:block}
+    .sidebar{width:200px}
+    .panel{
+      background:#071b2f;padding:12px;border-radius:10px;margin-bottom:12px;
+      box-shadow:inset 0 -2px 0 rgba(255,255,255,0.02)
+    }
+    h1{font-size:18px;margin:0 0 10px}
+    .score{font-size:20px;font-weight:700;letter-spacing:1px}
+    .small{font-size:12px;color:#9fb1c9}
+    button{
+      appearance:none;border:0;background:#1f6feb;color:white;
+      padding:8px 12px;border-radius:8px;cursor:pointer
+    }
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    .next{width:112px;height:112px;background:#042033;border-radius:8px;
+      display:grid;place-items:center}
+    footer{position:fixed;left:12px;bottom:12px;font-size:12px;color:#6f90ac}
+    /* ✅ 모바일 버튼 항상 표시 */
+    #touch-controls{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:center;
+      gap:8px;
+      margin-top:10px;
+      width:100%;
+    }
+    #touch-controls button{
+      flex:1 1 28%;
+      max-width:100px;
+      font-size:20px;
+      padding:14px;
+      border-radius:10px;
+      background:#1f6feb;
+      color:#fff;
+      border:none;
+      box-shadow:0 4px 8px rgba(0,0,0,.3);
+    }
+    #touch-controls button:active{transform:scale(0.95);}
+    @media(max-width:640px){
+      body{flex-direction:column;align-items:center;padding:16px}
+      .sidebar{width:100%;max-width:360px}
+      footer{position:static;margin-top:10px;}
+    }
+  </style>
+</head>
+<body>
+  <div class="board panel">
+    <canvas id="game" width="280" height="560"></canvas>
+  </div>
+  <div class="sidebar">
+    <div class="panel">
+      <h1>테트리스</h1>
+      <div class="small">목표: 줄을 지워 점수 획득</div>
+    </div>
+    <div class="panel">
+      <div>점수</div>
+      <div class="score" id="score">0</div>
+      <div class="small">레벨: <span id="level">1</span>  •  줄: <span id="lines">0</span></div>
+    </div>
+    <div class="panel">
+      <div>다음 조각</div>
+      <div class="next"><canvas id="next" width="112" height="112"></canvas></div>
+    </div>
+    <div class="panel controls">
+      <button id="start">시작 / 재시작</button>
+      <button id="pause">일시정지</button>
+    </div>
+  </div>
+
+  <!-- 🎮 터치 컨트롤 항상 표시 -->
+  <div id="touch-controls">
+    <button id="btn-left">←</button>
+    <button id="btn-rotate">↻</button>
+    <button id="btn-right">→</button>
+    <button id="btn-down">↓</button>
+    <button id="btn-drop">⤓</button>
+    <button id="btn-pause">⏸</button>
+  </div>
+
+  <footer>테트리su</footer>
+
+<script>
+const COLS=10,ROWS=20,CELL=28;
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const nextCanvas=document.getElementById('next'),nctx=nextCanvas.getContext('2d');
+
+const TETROMINOS={
+  I:[[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+     [[0,0,1,0],[0,0,1,0],[0,0,1,0],[0,0,1,0]]],
+  J:[[[1,0,0],[1,1,1],[0,0,0]],
+     [[0,1,1],[0,1,0],[0,1,0]],
+     [[0,0,0],[1,1,1],[0,0,1]],
+     [[0,1,0],[0,1,0],[1,1,0]]],
+  L:[[[0,0,1],[1,1,1],[0,0,0]],
+     [[0,1,0],[0,1,0],[0,1,1]],
+     [[0,0,0],[1,1,1],[1,0,0]],
+     [[1,1,0],[0,1,0],[0,1,0]]],
+  O:[[[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]]],
+  S:[[[0,1,1],[1,1,0],[0,0,0]],[[0,1,0],[0,1,1],[0,0,1]]],
+  Z:[[[1,1,0],[0,1,1],[0,0,0]],[[0,0,1],[0,1,1],[0,1,0]]],
+  T:[[[0,1,0],[1,1,1],[0,0,0]],[[0,1,0],[0,1,1],[0,1,0]],[[0,0,0],[1,1,1],[0,1,0]],[[0,1,0],[1,1,0],[0,1,0]]]
+};
+const COLORS={'I':'#4ad1ff','J':'#3b6bff','L':'#ff9a2e','O':'#ffd133','S':'#5af05a','Z':'#ff5a7a','T':'#c46bff'};
+
+let board,current,next,score=0,level=1,lines=0,dropInterval=800,lastTime=0,dropCounter=0,running=false,paused=false;
+
+function makeBoard(){board=Array.from({length:ROWS},()=>Array(COLS).fill(0));}
+function randomPiece(){const types=Object.keys(TETROMINOS);
+  const t=types[Math.floor(Math.random()*types.length)];
+  return {type:t,rotIndex:0,shape:TETROMINOS[t][0],x:Math.floor((COLS-4)/2),y:-1};
+}
+function drawCell(x,y,color){ctx.fillStyle=color;ctx.fillRect(x*CELL+2,y*CELL+2,CELL-4,CELL-4);}
+function draw(){ctx.fillStyle='#071028';ctx.fillRect(0,0,canvas.width,canvas.height);
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(board[r][c])drawCell(c,r,COLORS[board[r][c]]);
+  drawPiece(current);}
+function drawPiece(p){const sh=p.shape;
+  for(let r=0;r<sh.length;r++)for(let c=0;c<sh[r].length;c++)if(sh[r][c])drawCell(p.x+c,p.y+r,COLORS[p.type]);}
+function collide(b,p){const sh=p.shape;
+  for(let r=0;r<sh.length;r++)for(let c=0;c<sh[r].length;c++)if(sh[r][c]){
+    const x=p.x+c,y=p.y+r;if(x<0||x>=COLS||y>=ROWS)return true;if(y>=0&&b[y][x])return true;
+  }return false;}
+function merge(b,p){const sh=p.shape;
+  for(let r=0;r<sh.length;r++)for(let c=0;c<sh[r].length;c++)if(sh[r][c]){const x=p.x+c,y=p.y+r;if(y>=0)b[y][x]=p.type;}}
+function clearLines(){let full=0;
+  for(let r=ROWS-1;r>=0;r--)if(board[r].every(x=>x!==0)){board.splice(r,1);board.unshift(Array(COLS).fill(0));full++;r++;}
+  if(full>0){lines+=full;score+=(full===1?100:full===2?300:full===3?500:800)*level;
+    const newLevel=Math.floor(lines/10)+1;if(newLevel>level){level=newLevel;dropInterval=Math.max(100,800-(level-1)*60);}
+    updateInfo();}}
+function rotateMatrix(m){const N=m.length,res=Array.from({length:N},()=>Array(N).fill(0));
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++)res[c][N-1-r]=m[r][c];return res;}
+function attemptRotate(){const nextShape=rotateMatrix(current.shape);
+  const clone={...current,shape:nextShape};const kicks=[0,-1,1,-2,2];
+  for(const k of kicks){clone.x=current.x+k;if(!collide(board,clone)){current.shape=nextShape;current.x=clone.x;return;}}}
+function drop(){current.y++;if(collide(board,current)){current.y--;merge(board,current);clearLines();spawnNext();
+  if(collide(board,current)){running=false;alert('게임 오버\\n점수: '+score);}}}
+function hardDrop(){while(true){current.y++;if(collide(board,current)){current.y--;break;}}merge(board,current);clearLines();spawnNext();
+  if(collide(board,current)){running=false;alert('게임 오버\\n점수: '+score);}}
+function spawnNext(){current=next;current.x=Math.floor((COLS-current.shape[0].length)/2);current.y=-1;next=randomPiece();
+  nctx.clearRect(0,0,nextCanvas.width,nextCanvas.height);
+  drawNextPiece();}
+function drawNextPiece(){const sh=next.shape,size=112,cell=Math.floor(size/4)-2;
+  nctx.fillStyle='#042033';nctx.fillRect(0,0,size,size);
+  for(let r=0;r<sh.length;r++)for(let c=0;c<sh[r].length;c++)if(sh[r][c]){
+    const px=c*(cell+2)+20,py=r*(cell+2)+20;nctx.fillStyle=COLORS[next.type];nctx.fillRect(px,py,cell,cell);}}
+function updateInfo(){document.getElementById('score').textContent=score;
+  document.getElementById('level').textContent=level;
+  document.getElementById('lines').textContent=lines;}
+function startGame(){makeBoard();score=0;level=1;lines=0;dropInterval=800;updateInfo();
+  current=randomPiece();next=randomPiece();
+  current.x=Math.floor((COLS-current.shape[0].length)/2);
+  running=true;paused=false;drawNextPiece();loop(0);}
+function loop(t=0){if(!running)return;if(paused){requestAnimationFrame(loop);return;}
+  const delta=t-lastTime;lastTime=t;dropCounter+=delta;
+  if(dropCounter>dropInterval){drop();dropCounter=0;}draw();requestAnimationFrame(loop);}
+document.addEventListener('keydown',e=>{if(!running&&e.key==='Enter')startGame();
+  if(!running)return;
+  if(e.key==='ArrowLeft'){current.x--;if(collide(board,current))current.x++;}
+  else if(e.key==='ArrowRight'){current.x++;if(collide(board,current))current.x--;}
+  else if(e.key==='ArrowDown'){current.y++;if(collide(board,current))current.y--;}
+  else if(e.key==='ArrowUp'){attemptRotate();}
+  else if(e.code==='Space'){e.preventDefault();hardDrop();}
+  else if(e.key.toLowerCase()==='p'){paused=!paused;
+    document.getElementById('pause').textContent=paused?'계속':'일시정지';
+    if(!paused)loop();}
+  draw();});
+document.getElementById('start').onclick=()=>{startGame();document.getElementById('pause').textContent='일시정지';};
+document.getElementById('pause').onclick=()=>{paused=!paused;
+  document.getElementById('pause').textContent=paused?'계속':'일시정지';
+  if(!paused)loop();};
+
+// 📱 터치 버튼 조작
+function touchAction(act){
+  if(!running)return;
+  if(act==='left'){current.x--;if(collide(board,current))current.x++;}
+  else if(act==='right'){current.x++;if(collide(board,current))current.x--;}
+  else if(act==='down'){current.y++;if(collide(board,current))current.y--;}
+  else if(act==='rotate'){attemptRotate();}
+  else if(act==='drop'){hardDrop();}
+  else if(act==='pause'){paused=!paused;document.getElementById('pause').textContent=paused?'계속':'일시정지';if(!paused)loop();}
+  draw();
+}
+['left','right','down','rotate','drop','pause'].forEach(id=>{
+  document.getElementById('btn-'+id).addEventListener('click',()=>touchAction(id));
+});
+
+makeBoard();
+ctx.fillStyle='#9fb1c9';
+ctx.font='16px Arial';
+ctx.fillText('Start: 버튼 클릭 또는 Enter',8,canvas.height/2-8);
+nctx.fillStyle='#042033';nctx.fillRect(0,0,nextCanvas.width,nextCanvas.height);
+</script>
+</body>
+</html>
